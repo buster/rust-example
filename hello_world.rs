@@ -40,16 +40,12 @@ fn main() {
                 if status.is_none() {
                     println(fmt!("got %d bytes", nread));
                     let buf = buf.unwrap();
-                    for byte in buf.slice(0, nread as uint).iter() {
-                        println(fmt!("%u", *byte as uint));
-
-                        count += 1;
-                    }
-
+                    let got = std::str::from_bytes(buf.slice(0,nread as uint));
+                    count += nread;
+                    println(got);
                     let quit_msg = &~"QUIT\r\n";
-                    println(std::str::from_bytes(buf));
-                    if (std::str::from_bytes(buf).eq(quit_msg)) {
-
+                    if (got.eq(quit_msg)) {
+                        println("got QUIT message.. exiting!");
                         do stream_watcher.close {
                             server_stream_watcher.close(||());
                         }                        
