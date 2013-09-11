@@ -1,26 +1,66 @@
 #!/home/buster/bin/rust run
 
+extern mod extra;
+use extra::getopts::*;
+
 use std::rt::io::net::ip::{SocketAddr, Ipv4Addr};
 use std::rt::uv::net::{TcpWatcher};
 use std::cell::Cell;
 use std::vec;
 
 use std::rt::uv::{Loop, AllocCallback};
-use std::rt::uv::{vec_from_uv_buf, vec_to_uv_buf};
+use std::rt::uv::{vec_from_uv_buf, vec_to_uv_buf, slice_to_uv_buf};
+use std::rt::uv::uvll::uv_buf_t;
 use std::prelude::*;
 
+fn print_usage(program: &str, _opts: &[Opt]) {
+    printfln!("Usage: %s [options]", program);
+    println("-i <IP>\t\tIP to bind to ");
+    println("-h --help\tUsage");
+}
+
 fn main() {
+
+    let args = std::os::args();
+    let program = args[0].clone();
+    let opts = ~[
+            optopt("i"),
+            optflag("h"),
+            optflag("help")
+        ];
+
+    let matches = match getopts(args.tail(), opts) {
+        Ok(m) => { m }
+        Err(f) => { fail!(fail_str(f)) }
+    };
+
+    if opt_present(&matches, "h") || opt_present(&matches, "help") {
+        print_usage(program, opts);
+        return;
+    }
+
+    let bind_ip = opt_maybe_str(&matches, "i");
+
+    let bind_ip = match bind_ip {
+        Some(x) => x,
+        None => ~"127.0.0.1"
+    };
+
     do spawn {
         static MAX: int = 10;
         let mut loop_ = Loop::new();
         let mut server_tcp_watcher = { TcpWatcher::new(&mut loop_) };
-        let ip4 = Ipv4Addr(127,0,0,1);
-        //let addr = SocketAddr::from_str("127.0.0.1:2222");
-        server_tcp_watcher.bind(SocketAddr { ip: ip4, port: 9123});
+
+        let socket = match FromStr::from_str(bind_ip) {
+            Some(x) => x,
+            None => SocketAddr {ip: Ipv4Addr(127,0,0,1), port: 1234}
+        };
+
+        server_tcp_watcher.bind(socket);
         let loop_ = loop_;
-        println("listening");
+        println(fmt!("listening on %s!", socket.to_str()));
         do server_tcp_watcher.listen |mut server_stream_watcher, status| {
-            println("listened!");
+            println(fmt!("listened on %s!", socket.to_str()));
             assert!(status.is_none());
             let mut loop_ = loop_;
             let client_tcp_watcher = TcpWatcher::new(&mut loop_);
@@ -32,23 +72,29 @@ fn main() {
             let alloc: AllocCallback = |size| {
                 vec_to_uv_buf(vec::from_elem(size, 0u8))
             };
-            do client_tcp_watcher.read_start(alloc) |stream_watcher, nread, buf, status| {
-
+            do client_tcp_watcher.read_start(alloc) |mut stream_watcher, nread, buf, status| {
                 println("i'm reading!");
                 let buf = vec_from_uv_buf(buf);
                 let mut count = count_cell.take();
                 if status.is_none() {
                     println(fmt!("got %d bytes", nread));
                     let buf = buf.unwrap();
-                    let got = std::str::from_bytes(buf.slice(0,nread as uint));
+                    let buf_slice = buf.slice(0,nread as uint);
+                    let mut got = ~"";
+                    do std::str::not_utf8::cond.trap(|_| ~"QUIT\r\n").inside{
+                        got = std::str::from_utf8(buf_slice);
+                    }
                     count += nread;
                     println(got);
-                    let quit_msg = &~"QUIT\r\n";
-                    if (got.eq(quit_msg)) {
+                    if (got.eq(&~"QUIT\r\n")) {
                         println("got QUIT message.. exiting!");
-                        do stream_watcher.close {
-                            server_stream_watcher.close(||());
-                        }                        
+                        let msg = "BYE\r\n".as_bytes();
+                        let buf = slice_to_uv_buf(msg);
+                        do stream_watcher.write(buf) |stream_watcher, status| {
+                            println("fine");
+                            stream_watcher.close(||(println("closed")));
+                        }
+
                     }
                 } else {
                     assert_eq!(count, MAX);
@@ -59,7 +105,6 @@ fn main() {
                 count_cell.put_back(count);
             }
         }
-
         let mut loop_ = loop_;
         loop_.run();
         loop_.close();
