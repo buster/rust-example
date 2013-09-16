@@ -5,7 +5,8 @@ use getopts = extra::getopts;
 
 //or pull specific names into the local scope
 use std::rt::io::net::ip::{SocketAddr, Ipv4Addr};
-use std::rt::uv::net::{TcpWatcher};
+use std::rt::uv::net::{TcpWatcher, StreamWatcher};
+use std::rt::uv::{Buf, UvError};
 
 use std::vec;
 use std::rt::uv::{Loop, AllocCallback};
@@ -106,7 +107,21 @@ fn main() {
             };
             //since we have a new incoming connection and accepted it, we starting reading..
             //the allocator get's us the buffer to read into (i suppose)
-            do client_tcp_watcher.read_start(alloc) |mut client_stream_watcher, nread, buf, status| {
+            //client_tcp_watcher.read_start(alloc, read_and_respond)
+            do client_tcp_watcher.read_start(alloc) |client_stream_watcher, nread, buf, status| {
+                read_and_respond(client_stream_watcher, nread, buf, status);
+            }
+        }
+        //now the loop is mutable again ;)
+        let mut loop_ = loop_;
+        //the event loop runs in the lightweigth thread, run() blocks
+        loop_.run();
+        loop_.close();
+    }
+}
+
+
+fn read_and_respond(mut client_stream_watcher: StreamWatcher, nread: int, buf: std::rt::uv::Buf, status: Option<UvError>) {
                 println("i'm reading!");
                 //convert the libuv buffer to a vector, which we can work on in Rust
                 let buf = vec_from_uv_buf(buf);
@@ -137,6 +152,7 @@ fn main() {
                         let buf = slice_to_uv_buf(bye_msg);
                         //we write the BYE message to the client and handle the stream in the callback,
                         //closing if in the end
+
                         do client_stream_watcher.write(buf) |stream_watcher, error| {
                             //error is an Option<UvError> again...
                             if (error.is_none()) {
@@ -155,12 +171,5 @@ fn main() {
                 else {
                     printfln!("ERROR WHILE READING %s", status.unwrap().to_str());
                 }
-            }
-        }
-        //now the loop is mutable again ;)
-        let mut loop_ = loop_;
-        //the event loop runs in the lightweigth thread, run() blocks
-        loop_.run();
-        loop_.close();
-    }
+    
 }
