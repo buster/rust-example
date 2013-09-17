@@ -88,7 +88,7 @@ fn main() {
 
         //do is a convenience method to make tcpwatcher.listen(&callback_function(streamwatcher, status)); more readable
         //the callback (the closure after the do in brackets) will handle every connection attempt
-        do server_tcp_watcher.listen |mut server_stream_watcher, status| {
+        do server_tcp_watcher.listen |server_stream_watcher, status| {
 
             //print and string formatting seperate
             println(fmt!("listened on %s!", socket.to_str()));
@@ -101,25 +101,13 @@ fn main() {
             let mut loop_ = loop_;
 
             //We have a new connection, so we need a new Handle for that..
-            let client_tcp_watcher = TcpWatcher::new(&mut loop_);
-            let mut client_tcp_watcher = client_tcp_watcher.as_stream();
+            let client_stream_watcher = TcpWatcher::new(&mut loop_);
+            let client_stream_watcher = client_stream_watcher.as_stream();
 
-            //accept the connection on TCP level
-            server_stream_watcher.accept(client_tcp_watcher);
-            println("starting read");
-
-            //alloc will be an anonymous function that returns a buffer of size size
-            //the last element in the function is returned (ending the function with ; will prevent that!)
-            let alloc: AllocCallback = |size| {
-                vec_to_uv_buf(vec::from_elem(size, 0u8))
-            };
-
-            //since we have a new incoming connection and accepted it, we starting reading..
-            //the allocator get's us the buffer to read into (i suppose)
-            //client_tcp_watcher.read_start(alloc, read_and_respond)
-            do client_tcp_watcher.read_start(alloc) |client_stream_watcher, nread, buf, status| {
-                read_and_respond(client_stream_watcher, nread, buf, status);
+            if (accept_tcp_connection(server_stream_watcher, client_stream_watcher)) {
+                handle_connection(client_stream_watcher);
             }
+
         }
 
         //now the loop is mutable again ;)
@@ -131,6 +119,37 @@ fn main() {
     }
 }
 
+fn handle_connection(mut client_stream_watcher: StreamWatcher) {
+    //alloc will be an anonymous function that returns a buffer of size size
+    //the last element in the function is returned (ending the function with ; will prevent that!)
+    let alloc: AllocCallback = |size| {
+        vec_to_uv_buf(vec::from_elem(size, 0u8))
+    };
+
+    //since we have a new incoming connection and accepted it, we starting reading..
+    //the allocator get's us the buffer to read into (i suppose)
+    //client_stream_watcher.read_start(alloc, read_and_respond)
+    do client_stream_watcher.read_start(alloc) |client_stream_watcher, nread, buf, status| {
+        read_and_respond(client_stream_watcher, nread, buf, status);
+    }
+    
+}
+
+fn accept_tcp_connection(mut server_stream_watcher: StreamWatcher, client_stream_watcher:StreamWatcher) -> bool{
+    //TODO: add some control over accepting TCP connections
+    //accept the connection on TCP level
+    let accept = 1;
+    if (accept == 1) {
+        server_stream_watcher.accept(client_stream_watcher);
+        println("accepted");
+        return true
+    }
+    else {
+        //server_stream_watcher.close(||( println("not accepted server stream") ));
+        client_stream_watcher.close( ||( println("not accepted client stream") ));
+        return false
+    }
+}
 
 fn read_and_respond(mut client_stream_watcher: StreamWatcher, nread: int, buf: std::rt::uv::Buf, status: Option<UvError>) {
     println("i'm reading!");
@@ -171,7 +190,7 @@ fn read_and_respond(mut client_stream_watcher: StreamWatcher, nread: int, buf: s
             let buf = slice_to_uv_buf(bye_msg);
 
             //we write the BYE message to the client and handle the stream in the callback,
-            //closing if in the end
+            //closing it in the end
             do client_stream_watcher.write(buf) |stream_watcher, error| {
 
                 //error is an Option<UvError> again...
