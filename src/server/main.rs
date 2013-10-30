@@ -191,7 +191,7 @@ fn read_and_respond(mut client_stream_watcher: StreamWatcher, nread: int, buf: s
                     print(format!("Error closing stream: {}", error.unwrap().to_str()));
                 }
 
-                stream_watcher.read_stop();
+                stream_watcher.close();
 								
             }
 
